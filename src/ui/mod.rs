@@ -3,7 +3,6 @@
 // Author: https://github.com/xiaoqixian
 
 use std::io;
-use std::rc::Rc;
 
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
@@ -18,21 +17,22 @@ use tui::{
 };
 
 
+use self::{progress_bar::ProgressBar, white_panel::WhitePanel};
+
 use super::playback::PlayerError;
 
-//mod popup;
-//mod nested_layout;
 mod component;
-//mod app;
-//mod search_box;
-//mod progress_bar;
-//mod jumper;
+mod app;
+mod search_box;
+mod progress_bar;
 mod nested;
-mod enterable;
+mod block;
+mod white_panel;
+//mod single_widget;
+//mod time_sensitive;
 
-//use app::App;
-//use search_box::SearchBox;
-//use component::{CompMode, Component};
+use component::{CompState, Component};
+use search_box::SearchBox;
 
 enum Error {
     PlayerError(PlayerError),
@@ -62,42 +62,44 @@ fn inner_run<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), Error> {
         Ok(s) => s
     };
 
-    //let mut app = App::<Rc<dyn Component>>::new();
-    //let sb = Rc::new(SearchBox::new(Constraint::Min(3)));
-    //app.registrate(sb);
-    
-    //app.init(size);
+    let mut app = app::new();
+    let sb = SearchBox::new(Constraint::Length(1))
+        .block_with_title(String::from("搜索栏"));
+    let pb = ProgressBar::new(Constraint::Length(3));
+    let wp = WhitePanel::new(Constraint::Min(1));
 
+    app.registrate(sb);
+    app.registrate(pb);
+    app.registrate(wp);
+    app.set_area(terminal.size().unwrap());
+    
     'run: loop {
-        //app.set_area(terminal.size().unwrap());
-        //app.render(terminal.current_buffer_mut());
+        app.render(terminal.current_buffer_mut());
+        let min_update_duration = app.update_duration()
+            .unwrap_or(std::time::Duration::MAX);
+
         if let Err(e) = terminal.draw(|_| {}) {
             return Err(Error::IOError(e));
         }
 
-        match event::read() {
-            Err(e) => return Err(Error::IOError(e)),
-            Ok(ev) => {
-                if let Event::Resize(width, height) = ev {
-                    let _ = terminal.resize(Rect::new(0, 0, width, height));
-                }
+        if event::poll(min_update_duration).unwrap() {
+            match event::read() {
+                Err(e) => return Err(Error::IOError(e)),
+                Ok(ev) => {
+                    if let Event::Resize(width, height) = ev {
+                        let _ = terminal.resize(Rect::new(0, 0, width, height));
+                        app.set_area(terminal.size().unwrap());
+                        continue 'run;
+                    }
 
-                //match app.read_event(ev) {
-                    //CompMode::Exit => break 'run,
-                    //_ => {}
-                //}
+                    match app.read_event(ev) {
+                        CompState::Exit => break 'run,
+                        _ => {}
+                    }
+                }
             }
         }
     }
-        //match event::read() {
-            //Err(e) => return Err(Error::IOError(e)),
-            //Ok(ev) => match app.read_event(ev) {
-                //CompMode::Exit => break 'run,
-                //_ => {}
-            //}
-        //}
-    //}
-
     Ok(())
 }
 
@@ -105,8 +107,12 @@ fn inner_run<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), Error> {
 #[test]
 fn test_ui() {
     run();
+}
+
+//#[test]
+//fn debug_test() {
     //let stdout = io::stdout();
     //let mut terminal = Terminal::new(CrosstermBackend::new(stdout)).expect("create terminal failed");
 
     //let _ = inner_run(&mut terminal);
-}
+//}

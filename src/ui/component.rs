@@ -18,28 +18,24 @@
  * to its inner components, or exit `listen_key` method.
  */
 
-use std::rc::Rc;
-use crossterm::event::{Event, KeyCode};
-
 use tui::{
-    layout::{Constraint, Rect, Direction},
+    layout::{Constraint, Rect},
     buffer::Buffer,
-    style::{Style, Color},
-    widgets::BorderType
 };
 
-use super::enterable::Enterable;
+use super::block::Block;
 
-#[derive(Clone, Debug)]
-pub enum CursorMode {
-    Hover,
-    Entered,
-    Leave
-}
-
-pub enum CompMode {
+#[derive(Debug, Clone, Copy)]
+pub enum CompState {
     Stay,
     Exit
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CompMode {
+    Enter,
+    Hover,
+    Leave
 }
 
 pub trait Component {
@@ -49,116 +45,76 @@ pub trait Component {
     /// Every component is supposed have a constraint
     fn get_constraint(&self) -> Constraint;
 
-    fn read_event(&mut self, event: Event) -> CompMode;
+    fn read_event(&mut self, event: crossterm::event::Event) -> CompState;
 
-    fn render(&self, buffer: &mut Buffer);
+    fn render(&mut self, buffer: &mut Buffer);
 
+    fn alter_mode(&mut self, mode: CompMode) -> CompState;
+
+    fn update_duration(&self) -> Option<std::time::Duration>;
+
+
+    // Below are all built-in components
+    // for you to easily wrap a component in.
+
+    /// To wrap in a block
     #[inline]
-    fn inner_components_size(&self) -> usize {0}
-
-    /// For component to alternate style
-    /// when entered, if necessary.
-    fn enter(&mut self) {}
-
-    /// Same as enter
-    fn hover(&mut self) {}
-
-    /// Same as enter
-    fn leave(&mut self) {}
-
-    /// Components are unenterable by default.
-    /// But if they are wrapped in an Enterable type.
-    /// This method will be override by Enterable, 
-    /// and then they are enterable.
-    #[inline]
-    fn is_enterable(&self) -> bool { false }
-
-    #[inline]
-    fn enterable(self) -> Enterable<Self> 
+    fn block(self) -> Block<Self>
     where Self: Sized
     {
-        Enterable::new(self)
+        Block::new(self)
     }
 
-    fn set_cursor(&self, cursor: CursorMode) {}
-
+    /// To wrap in a block with title
     #[inline]
-    fn get_cursor(&self) -> CursorMode {
-        CursorMode::Leave
-    }
-
-    #[inline]
-    fn border_type(&self) -> Option<BorderType> {
-        None
-    }
-
-    #[inline]
-    fn border_style(&self) -> Option<Style> {
-        None
+    fn block_with_title(self, title: String) -> Block<Self>
+    where Self: Sized
+    {
+        Block::new(self)
+            .title(title)
     }
 }
 
-/*pub trait Motion {*/
-    /*fn jump(&self, init: usize, key_code: KeyCode) -> usize;*/
-/*}*/
+/// A stateful component is a component 
+/// that carries a CompMode member.
+pub trait StatefulComponent {
+    fn comp_mode(&self) -> CompMode;
+}
 
-/*impl<T> Motion for T*/
-/*where T: Component*/
-/*{*/
-    /*fn jump(&self, mut init: usize, key_code: KeyCode) -> usize {*/
-        /*let vertical = match self.direction() {*/
-            /*None => return init,*/
-            /*Some(Direction::Vertical) => true,*/
-            /*Some(Direction::Horizontal) => false*/
-        /*};*/
+/// Provide a default border type/style getter
+/// for stateful components that need a frame
+/// whose border type/style is able to alternate
+/// with the component state.
+use tui::{
+    widgets::BorderType,
+    style::{Style, Color}
+};
+pub trait DefaultFrameStyle {
+    fn border_type(&self) -> BorderType;
 
-        /*let len = self.inner_components_size();*/
+    fn border_style(&self) -> Style;
+}
 
-        /*match key_code {*/
-            /*KeyCode::Up | KeyCode::Char('k') if vertical*/
-                /*=> init = std::cmp::max(0, init-1),*/
-            /*KeyCode::Down | KeyCode::Char('j') if vertical*/
-                /*=> init = std::cmp::min(len-1, init+1),*/
-            /*KeyCode::Left | KeyCode::Char('h') if !vertical*/
-                /*=> init = std::cmp::max(0, init-1),*/
-            /*KeyCode::Right | KeyCode::Char('l') if !vertical*/
-                /*=> init = std::cmp::min(len-1, init+1),*/
-            /*_ => {}*/
-        /*}*/
+impl<C> DefaultFrameStyle for C
+where C: Component + StatefulComponent
+{
+    fn border_type(&self) -> BorderType {
+        match self.comp_mode() {
+            CompMode::Enter |
+            CompMode::Leave => BorderType::Rounded,
 
-        /*init*/
-    /*}*/
-/*}*/
+            CompMode::Hover => BorderType::Double
+        }
+    }
 
-/*pub trait FrameStyle {*/
-    /*fn get_border_type(&self) -> BorderType; */
+    fn border_style(&self) -> Style {
+        Style::default().fg(
+            match self.comp_mode() {
+                CompMode::Enter |
+                CompMode::Hover => Color::Blue,
 
-    /*fn get_border_style(&self) -> Style;*/
-/*}*/
-
-/*impl<T> FrameStyle for T*/
-/*where T: Component */
-/*{*/
-    /*fn get_border_type(&self) -> BorderType {*/
-        /*match self.get_cursor() {*/
-            /*CursorMode::Hover =>*/
-                /*BorderType::Double,*/
-            /*CursorMode::Entered => */
-                /*BorderType::Rounded,*/
-            /*CursorMode::Leave => */
-                /*BorderType::Rounded*/
-        /*}*/
-    /*}*/
-
-    /*fn get_border_style(&self) -> Style {*/
-        /*let mut style = Style::default();*/
-        /*match self.get_cursor() {*/
-            /*CursorMode::Hover => */
-                /*style.fg(Color::Blue),*/
-            /*CursorMode::Entered =>*/
-                /*style.fg(Color::Blue),*/
-            /*CursorMode::Leave =>*/
-                /*style.fg(Color::White)*/
-        /*}*/
-    /*}*/
-/*}*/
+                CompMode::Leave => Color::White
+            }
+        )
+    }
+}

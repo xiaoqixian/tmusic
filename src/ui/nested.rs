@@ -2,20 +2,20 @@
 // Mail: lunar_ubuntu@qq.com
 // Author: https://github.com/xiaoqixian
 
-use super::component::{CompMode, Component};
+use super::component::{CompState, Component, CompMode};
 
 use crossterm::event::{Event, KeyCode};
 use tui::layout::{Rect, Direction, Layout, Constraint};
 
 #[derive(Debug, Clone, Copy)]
-enum Mode {
+enum CursorMode {
     Entered(usize),
     Hover(usize)
 }
 
 pub struct Nested {
     inner_comps: Vec<Box<dyn Component>>,
-    cursor: Mode,
+    cursor: CursorMode,
     constraint: Constraint,
     area: Option<Rect>,
     direction: Direction, //vertical by default
@@ -25,7 +25,7 @@ impl Nested {
     pub fn new(c: Constraint) -> Self {
         Self {
             inner_comps: Vec::new(),
-            cursor: Mode::Hover(0),
+            cursor: CursorMode::Hover(0),
             constraint: c,
             area: None,
             direction: Direction::Vertical,
@@ -37,21 +37,26 @@ impl Nested {
         self
     }
 
-    pub fn registrate(&mut self, comp: Box<dyn Component>) {
+    pub fn registrate<T>(&mut self, mut comp: T) 
+    where T: Component + Sized + 'static
+    {
+        if self.inner_comps.is_empty() {
+            comp.alter_mode(CompMode::Hover);
+        }
+
         self.inner_comps
-            .push(comp);
+            .push(Box::from(comp));
 
         // if area is decided, registrate a new comp
         // need a whole new layout adjustment.
-        if let Some(area) = self.area {
-            self.set_area(area);
-        }
+        self.realign();
     }
-}
 
-impl Component for Nested {
-    fn set_area(&mut self, area: Rect) {
-        self.area = Some(area);
+    fn realign(&mut self) {
+        let area = match self.area {
+            None => return,
+            Some(area) => area
+        };
 
         let constraints = self.inner_comps
             .iter()
@@ -71,34 +76,59 @@ impl Component for Nested {
             });
     }
 
+}
+
+impl Component for Nested {
+    fn set_area(&mut self, area: Rect) {
+        if let Some(curr_area) = self.area {
+            if curr_area == area {
+                return;
+            }
+        }
+
+        self.area = Some(area);
+        self.realign();
+    }
+
     #[inline]
     fn get_constraint(&self) -> Constraint {
         self.constraint.clone()
     }
 
-    fn read_event(&mut self, event: Event) -> CompMode {
+    fn read_event(&mut self, event: Event) -> CompState {
+        if self.inner_comps.is_empty() {
+            return CompState::Stay;
+        }
+
         let hover_index = match self.cursor {
-            Mode::Entered(entered_index) => {
-                if let CompMode::Exit = self.inner_comps
+            CursorMode::Entered(entered_index) => {
+                if let CompState::Exit = self.inner_comps
                     .get_mut(entered_index)
                     .unwrap() 
                     .read_event(event) {
 
-                    self.cursor = Mode::Hover(entered_index);
+                    self.cursor = CursorMode::Hover(entered_index);
+
+                    self.inner_comps[entered_index]
+                        .alter_mode(CompMode::Hover);
                 }
 
-                return CompMode::Stay;
+                return CompState::Stay;
             },
-            Mode::Hover(i) => i
+            CursorMode::Hover(i) => i
         };
 
         match event {
             Event::Key(key_event) => match key_event.code {
-                KeyCode::Esc => return CompMode::Exit,
+                KeyCode::Esc => return CompState::Exit,
                 KeyCode::Enter => {
-                    if self.inner_comps[hover_index].is_enterable() {
-                        self.inner_comps[hover_index].enter();
-                        self.cursor = Mode::Entered(hover_index);
+                    if let Some(comp) = self.inner_comps.get_mut(hover_index) {
+                        match comp.alter_mode(CompMode::Enter) {
+                            CompState::Exit => {},
+                            _ => {
+                                self.cursor = CursorMode::Entered(hover_index);
+                            }
+                        }
                     }
                 },
 
@@ -108,30 +138,62 @@ impl Component for Nested {
                 KeyCode::Right | KeyCode::Char('l') => {
                     let len = self.inner_comps.len();
 
-                    self.cursor = Mode::Hover({
+                    let new_hover = {
                         match key_event.code {
                             KeyCode::Up | KeyCode::Char('k') |
                             KeyCode::Left | KeyCode::Char('h') =>
-                                std::cmp::max(0, hover_index-1),
+                                std::cmp::max(1, hover_index) - 1,
                             KeyCode::Down | KeyCode::Char('j') |
                             KeyCode::Right | KeyCode::Char('l') =>
                                 std::cmp::min(len-1, hover_index+1),
                             _ => hover_index // no likely to happen
                         }
-                    });
+                    };
+                
+                    if new_hover != hover_index {
+                        self.inner_comps[hover_index]
+                            .alter_mode(CompMode::Leave);
+                        self.inner_comps[new_hover]
+                            .alter_mode(CompMode::Hover);
+                    }
+
+                    self.cursor = CursorMode::Hover(new_hover);
                 }
                 _ => {}
             },
             _ => {}
         }
 
-        CompMode::Stay
+        CompState::Stay
     }
 
     #[inline]
-    fn render(&self, buffer: &mut tui::buffer::Buffer) {
+    fn render(&mut self, buffer: &mut tui::buffer::Buffer) {
+        self.inner_comps
+            .iter_mut()
+            .for_each(|comp| comp.render(buffer));
+    }
+
+    #[inline]
+    fn alter_mode(&mut self, mode: CompMode) -> CompState {
+        CompState::Stay
+    }
+
+    #[inline]
+    fn update_duration(&self) -> Option<std::time::Duration> {
+        if self.inner_comps.is_empty() {
+            return None;
+        }
         self.inner_comps
             .iter()
-            .for_each(|comp| comp.render(buffer));
+            .min_by(|comp1, comp2| {
+                let d1 = comp1.update_duration()
+                    .unwrap_or(std::time::Duration::MAX);
+                let d2 = comp2.update_duration()
+                    .unwrap_or(std::time::Duration::MAX);
+                d1.cmp(&d2)
+            })
+            .unwrap()
+            .update_duration()
     }
 }

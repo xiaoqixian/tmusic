@@ -2,18 +2,14 @@
 // Mail: lunar_ubuntu@qq.com
 // Author: https://github.com/xiaoqixian
 
-use std::rc::Rc;
-
 use tui::{
     widgets::BorderType,
-    layout::Constraint,
-    buffer::Buffer,
     style::{Style, Color}
 };
 
 use crossterm::event::Event;
 
-use super::component::{CompMode, Component};
+use super::component::{CompMode, Component, ComponentWrapper};
 
 enum Mode {
     Entered,
@@ -35,68 +31,76 @@ impl<C> Enterable<C> {
     }
 }
 
-impl<C> Component for Enterable<C>
+impl<C> ComponentWrapper for Enterable<C>
+where C: Component
+{
+    type Inner = C;
+
+    #[inline]
+    fn inner_ref<'a>(&'a self) -> Option<&'a Self::Inner> {
+        Some(&self.inner)
+    }
+
+    #[inline]
+    fn inner_mut<'a>(&'a mut self) -> Option<&'a mut Self::Inner> {
+        Some(&mut self.inner)
+    }
+}
+
+impl<C> Enterable<C>
 where C: Component
 {
     #[inline]
-    fn set_area(&mut self, area: tui::layout::Rect) {
-        self.inner.set_area(area)
+    pub fn read_event(&mut self, event: Event) -> CompMode {
+        let inner_mode = self.inner.read_event(event);
+        if let CompMode::Exit = inner_mode {
+            self.cursor_mode = Mode::Hover;
+        }
+        inner_mode
     }
 
+    /// @Override
     #[inline]
-    fn get_constraint(&self) -> Constraint {
-        self.inner.get_constraint()
-    }
-
-    fn read_event(&mut self, event: Event) -> CompMode {
-        CompMode::Stay
-    }
-
-    #[inline]
-    fn render(&self, buffer: &mut Buffer) {
-        self.inner.render(buffer);
-    }
-
-    #[inline]
-    fn is_enterable(&self) -> bool {
+    pub fn is_enterable(&self) -> bool {
         true
     }
 
     #[inline]
-    fn enter(&mut self) {
+    pub fn enter(&mut self) {
         self.cursor_mode = Mode::Entered;
         self.inner.enter();
     }
 
     #[inline]
-    fn hover(&mut self) {
+    pub fn hover(&mut self) {
         self.cursor_mode = Mode::Hover;
         self.inner.hover();
     }
 
     #[inline]
-    fn leave(&mut self) {
+    pub fn leave(&mut self) {
         self.cursor_mode = Mode::Left;
         self.inner.leave();
     }
 
     #[inline]
-    fn border_type(&self) -> Option<BorderType> {
-        Some(match self.cursor_mode {
+    pub fn border_type(&self) -> BorderType {
+        match self.cursor_mode {
             Mode::Entered |
             Mode::Left => BorderType::Rounded,
 
             Mode::Hover => BorderType::Double
-        })
+        }
     }
 
     #[inline]
-    fn border_style(&self) -> Option<Style> {
-        Some(match self.cursor_mode {
+    pub fn border_style(&self) -> Style {
+        match self.cursor_mode {
             Mode::Entered |
             Mode::Hover => Style::default().fg(Color::Blue),
 
             Mode::Left => Style::default()
-        })
+        }
     }
 }
+

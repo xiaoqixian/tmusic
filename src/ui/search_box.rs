@@ -2,30 +2,32 @@
 // Mail: lunar_ubuntu@qq.com
 // Author: https://github.com/xiaoqixian
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use tui::{
-    layout::{Constraint, Direction, Rect}, 
-    widgets::{Block, Borders, Widget}
+    layout::{Constraint, Rect}, 
+    widgets::{Paragraph, Widget},
+    text::Span
 };
 
 use crossterm::event::{Event, KeyCode};
 
-use super::component::{CompMode, Component, CursorMode, FrameStyle};
+use super::component::{CompMode, Component, CompState};
 
 pub struct SearchBox {
     constraint: Constraint,
-    area: RefCell<Rect>,
-    cursor: RefCell<CursorMode>
+    area: Rect,
+    mode: CompMode,
+    input: String,
+    blink: bool
 }
 
 impl SearchBox {
     pub fn new(c: Constraint) -> Self {
         Self {
             constraint: c,
-            area: RefCell::new(Rect::default()),
-            cursor: RefCell::new(CursorMode::Leave)
+            area: Rect::default(),
+            mode: CompMode::Leave,
+            input: String::new(),
+            blink: false
         }
     }
 }
@@ -33,65 +35,66 @@ impl SearchBox {
 impl Component for SearchBox {
     #[inline]
     fn get_constraint(&self) -> Constraint {
-        self.constraint
+        self.constraint.clone()
     }
 
     #[inline]
-    fn set_area(&self, area: tui::layout::Rect) {
-        *self.area.borrow_mut() = area;
+    fn set_area(&mut self, area: Rect) {
+        self.area = area;
     }
 
-    fn render(&self, buffer: &mut tui::buffer::Buffer) {
-        Block::default()
-            .title("搜索栏")
-            .borders(Borders::ALL)
-            .border_type(self.get_border_type())
-            .border_style(self.get_border_style())
-            .render(self.area.borrow().clone(), buffer);
+    fn render(&mut self, buffer: &mut tui::buffer::Buffer) {
+        let text = Span::raw(
+            match self.mode {
+                CompMode::Enter => {
+                    if self.input.is_empty() {
+                        self.blink = !self.blink;
+                        if self.blink {
+                            " "
+                        } else {
+                            "|"
+                        }
+                    } else {
+                        self.input.as_str()
+                    }
+                },
+                _ => " "
+            }
+        );
+
+        Paragraph::new(text)
+            .render(self.area, buffer);
     }
 
-    fn read_event(&self, event: crossterm::event::Event) -> 
-        CompMode<Rc<dyn Component>> 
-    {
+    fn read_event(&mut self, event: crossterm::event::Event) -> CompState {
         match event {
             Event::Key(key_event) => match key_event.code {
-                KeyCode::Esc => return CompMode::Exit,
+                KeyCode::Esc => return CompState::Exit,
                 _ => {}
             },
             _ => {}
         }
 
-        CompMode::Stay
+        CompState::Stay
     }
 
     #[inline]
-    fn inner_components_size(&self) -> usize {
-        0
+    fn alter_mode(&mut self, mode: CompMode) -> CompState {
+        self.mode = mode;
+        CompState::Stay
     }
 
-    #[inline]
-    fn direction(&self) -> Option<Direction> {
-        None
-    }
-
-    #[inline]
-    fn get_cursor(&self) -> CursorMode {
-        self.cursor.borrow().clone()
-    }
-    
-    #[inline]
-    fn enter(&self) {
-        *self.cursor.borrow_mut() = CursorMode::Entered;
-    }
-
-    #[inline]
-    fn hover(&self) {
-        *self.cursor.borrow_mut() = CursorMode::Hover;
-    }
-
-    #[inline]
-    fn leave(&self) {
-        *self.cursor.borrow_mut() = CursorMode::Leave;
+    fn update_duration(&self) -> Option<std::time::Duration> {
+        match self.mode {
+            CompMode::Enter => {
+                if self.input.is_empty() {
+                    Some(std::time::Duration::from_millis(500))
+                } else {
+                    None
+                }
+            },
+            _ => None
+        }
     }
 }
 
