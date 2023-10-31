@@ -25,6 +25,7 @@ mod component;
 mod app;
 mod search_box;
 mod progress_bar;
+mod naked_nested;
 mod nested;
 mod block;
 mod white_panel;
@@ -34,6 +35,7 @@ mod white_panel;
 use component::{CompState, Component};
 use search_box::SearchBox;
 
+#[derive(Debug)]
 enum Error {
     PlayerError(PlayerError),
     IOError(std::io::Error)
@@ -54,6 +56,11 @@ pub fn run() {
         DisableMouseCapture
     ).expect("leave execution failed");
     terminal.show_cursor().expect("show cursor failed");
+
+    if let Err(e) = res {
+        panic!("error: {:?}", e);
+    }
+
 }
 
 fn inner_run<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), Error> {
@@ -63,27 +70,38 @@ fn inner_run<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), Error> {
     };
 
     let mut app = app::new();
-    let sb = SearchBox::new(Constraint::Length(1))
+    let sb = SearchBox::new(Constraint::Length(3))
         .block_with_title(String::from("搜索栏"));
-    let pb = ProgressBar::new(Constraint::Length(3));
-    let wp = WhitePanel::new(Constraint::Min(1));
+    //let pb = ProgressBar::new(Constraint::Length(3));
+    let pb = WhitePanel::new(Constraint::Length(3)).block();
+    let mut panel = naked_nested::NakedNested::new(Constraint::Min(3))
+        .direction(tui::layout::Direction::Horizontal);
+
+    let wp1 = WhitePanel::new(Constraint::Percentage(30))
+        .block();
+    let wp2 = WhitePanel::new(Constraint::Percentage(70))
+        .block();
+
+    panel.registrate(wp1);
+    panel.registrate(wp2);
 
     app.registrate(sb);
     app.registrate(pb);
-    app.registrate(wp);
+    app.registrate(panel);
     app.set_area(terminal.size().unwrap());
+    app.alter_mode(component::CompMode::Enter);
     
     'run: loop {
         app.render(terminal.current_buffer_mut());
         let min_update_duration = app.update_duration()
-            .unwrap_or(std::time::Duration::MAX);
+            .unwrap_or(std::time::Duration::from_secs(100));
 
         if let Err(e) = terminal.draw(|_| {}) {
             return Err(Error::IOError(e));
         }
 
-        if event::poll(min_update_duration).unwrap() {
-            match event::read() {
+        match event::poll(min_update_duration) {
+            Ok(_) => match event::read() {
                 Err(e) => return Err(Error::IOError(e)),
                 Ok(ev) => {
                     if let Event::Resize(width, height) = ev {
@@ -92,12 +110,13 @@ fn inner_run<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), Error> {
                         continue 'run;
                     }
 
-                    match app.read_event(ev) {
+                    match app.feed_event(ev) {
                         CompState::Exit => break 'run,
                         _ => {}
                     }
                 }
-            }
+            },
+            Err(e) => return Err(Error::IOError(e))
         }
     }
     Ok(())

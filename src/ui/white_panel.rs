@@ -5,9 +5,11 @@
 use tui::layout::Constraint;
 
 use super::component::{
-    CompState,
-    Component,
-    CompMode
+    CompState, 
+    Component, 
+    Query,
+    QueryResponse,
+    Attribution
 };
 
 pub struct WhitePanel {
@@ -23,29 +25,27 @@ impl WhitePanel {
 }
 
 impl Component for WhitePanel {
-    #[inline]
-    fn set_area(&mut self, _: tui::layout::Rect) {}
-
-    #[inline]
-    fn get_constraint(&self) -> Constraint {
-        self.constraint.clone()
+    fn query(&self, q: Query) -> QueryResponse {
+        match q {
+            Query::Constraint => 
+                QueryResponse::Constraint(self.constraint.clone()),
+            Query::Title => QueryResponse::Title(None),
+            Query::UpdateDuration => QueryResponse::UpdateDuration(None)
+        }
     }
 
     #[inline]
-    fn render(&mut self, _: &mut tui::buffer::Buffer) {}
-
-    #[inline]
-    fn read_event(&mut self, _: crossterm::event::Event) -> CompState {
-        CompState::Exit
-    }
-
-    #[inline]
-    fn alter_mode(&mut self, _: CompMode) -> CompState {
-        CompState::Exit
-    }
-
-    #[inline]
-    fn update_duration(&self) -> Option<std::time::Duration> {
+    fn set_attr(&mut self, _: Attribution) -> Option<CompState> {
         None
+    }
+
+    #[inline]
+    fn feed_event(&mut self, _: crossterm::event::Event) -> CompState {
+        CompState::Stay
+    }
+
+    #[inline]
+    fn render(&mut self, _: &mut tui::buffer::Buffer) {
+        
     }
 }

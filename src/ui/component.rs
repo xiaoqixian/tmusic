@@ -28,7 +28,15 @@ use super::block::Block;
 #[derive(Debug, Clone, Copy)]
 pub enum CompState {
     Stay,
-    Exit
+    Exit,
+
+    /// Component exit and ignore the event
+    ExitIgnore,
+
+    /// Returned when hovered on by NakedNested
+    /// It conveys the will of taking over control
+    /// of events to its parent component.
+    Fall
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -38,20 +46,66 @@ pub enum CompMode {
     Leave
 }
 
+/// Provide an enum to allow component wrapper 
+/// to query information from its inner component
+/// A QueryMsg is supposed to carry a channel Sender
+/// provided by the querier to transfer the information 
+/// back to the querier.
+#[derive(Debug, Clone, Copy)]
+pub enum Query {
+    Title,
+    Constraint,
+    UpdateDuration
+}
+#[derive(Debug, Clone)]
+pub enum QueryResponse {
+    Title(Option<String>),
+    Constraint(tui::layout::Constraint),
+    UpdateDuration(Option<std::time::Duration>)
+}
+
+#[derive(Debug, Clone)]
+pub enum Attribution {
+    Area(Rect),
+    Mode(CompMode)
+}
+
 pub trait Component {
-    /// Every component should be confined in a certain area
-    fn set_area(&mut self, area: Rect);
+    fn set_attr(&mut self, attr: Attribution) -> Option<CompState>;
 
-    /// Every component is supposed have a constraint
-    fn get_constraint(&self) -> Constraint;
+    fn query(&self, q: Query) -> QueryResponse;
 
-    fn read_event(&mut self, event: crossterm::event::Event) -> CompState;
+    fn feed_event(&mut self, event: crossterm::event::Event) -> CompState;
 
     fn render(&mut self, buffer: &mut Buffer);
 
-    fn alter_mode(&mut self, mode: CompMode) -> CompState;
+    // below are methods implemented by default 
+    // to avoid code repeation.
+    #[inline]
+    fn get_constraint(&self) -> Constraint {
+        match self.query(Query::Constraint) {
+            QueryResponse::Constraint(c) => c,
+            q => panic!("Wrong query response kind: {:?}", q)
+        }
+    }
 
-    fn update_duration(&self) -> Option<std::time::Duration>;
+    #[inline]
+    fn update_duration(&self) -> Option<std::time::Duration> {
+        match self.query(Query::UpdateDuration) {
+            QueryResponse::UpdateDuration(d) => d,
+            q => panic!("Wrong query response kind: {:?}", q)
+        }
+    }
+
+    #[inline]
+    fn set_area(&mut self, area: Rect) {
+        let _ = self.set_attr(Attribution::Area(area));
+    }
+
+    #[inline]
+    fn alter_mode(&mut self, mode: CompMode) -> Option<CompState> {
+        self.set_attr(Attribution::Mode(mode))
+    }
 
 
     // Below are all built-in components

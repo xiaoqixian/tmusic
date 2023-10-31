@@ -1,4 +1,4 @@
-// Date: Wed Oct 25 20:01:58 2023
+// Date: Mon Oct 30 16:58:32 2023
 // Mail: lunar_ubuntu@qq.com
 // Author: https://github.com/xiaoqixian
 
@@ -20,7 +20,14 @@ enum CursorMode {
     Hover(usize)
 }
 
-pub struct Nested {
+/// Provide a naked nested component.
+/// A naked nested component is just like a nested
+/// component, but the cursor falls in it when the
+/// cursor hovers it.
+/// This component is provided to enable components
+/// aligned in a different direction than the direction
+/// of the its parent nested component.
+pub struct NakedNested {
     inner_comps: Vec<Box<dyn Component>>,
     cursor: CursorMode,
     constraint: Constraint,
@@ -28,7 +35,7 @@ pub struct Nested {
     direction: Direction, //vertical by default
 }
 
-impl Nested {
+impl NakedNested {
     pub fn new(c: Constraint) -> Self {
         Self {
             inner_comps: Vec::new(),
@@ -44,7 +51,7 @@ impl Nested {
         self
     }
 
-    pub fn registrate<T>(&mut self, comp: T) 
+    pub fn registrate<T>(&mut self, mut comp: T) 
     where T: Component + Sized + 'static
     {
         self.inner_comps
@@ -84,10 +91,7 @@ impl Nested {
     fn hover(&mut self, comp_index: usize) {
         let comp_state = match self.inner_comps[comp_index].alter_mode(CompMode::Hover) {
             Some(cs) => cs,
-            None => {
-                self.cursor = CursorMode::Hover(comp_index);
-                return
-            }
+            None => return
         };
         match comp_state {
             CompState::Fall => {
@@ -100,12 +104,9 @@ impl Nested {
     }
 
     fn enter(&mut self, comp_index: usize) {
-        let comp_state = match self.inner_comps[comp_index].alter_mode(CompMode::Enter) {
+        let comp_state = match self.inner_comps[comp_index].alter_mode(CompMode::Hover) {
             Some(cs) => cs,
-            None => {
-                self.cursor = CursorMode::Entered(comp_index);
-                return;
-            }
+            None => return
         };
         match comp_state {
             CompState::Exit => {
@@ -121,12 +122,14 @@ impl Nested {
         if old_index != new_index {
             self.inner_comps[old_index]
                 .alter_mode(CompMode::Leave);
-            self.hover(new_index);
+            self.inner_comps[new_index]
+                .alter_mode(CompMode::Hover);
+            self.cursor = CursorMode::Hover(new_index);
         }
     }
 }
 
-impl Component for Nested {
+impl Component for NakedNested {
     fn query(&self, q: Query) -> QueryResponse {
         match q {
             Query::Title => QueryResponse::Title(None),
@@ -176,9 +179,15 @@ impl Component for Nested {
             CursorMode::Hover(i) => i
         };
 
+        let len = self.inner_comps.len();
+        let vertical = match self.direction {
+            Direction::Vertical => true,
+            Direction::Horizontal => false
+        };
+
         match event {
             Event::Key(key_event) => match key_event.code {
-                KeyCode::Esc => return CompState::Exit,
+                KeyCode::Esc => return CompState::ExitIgnore,
                 KeyCode::Enter => {
                     if let Some(comp_state) = self.inner_comps[hover_index]
                         .alter_mode(CompMode::Enter)
@@ -189,34 +198,25 @@ impl Component for Nested {
                         }
                     }
                 },
-
-                KeyCode::Up | KeyCode::Char('k') |
-                KeyCode::Down | KeyCode::Char('j') |
-                KeyCode::Left | KeyCode::Char('h') |
-                KeyCode::Right | KeyCode::Char('l') => {
-                    let len = self.inner_comps.len();
-                    let vertical = match self.direction {
-                        Direction::Vertical => true,
-                        Direction::Horizontal => false
-                    };
-
-                    let new_hover = {
-                        match key_event.code {
-                            KeyCode::Up | KeyCode::Char('k') if vertical =>
-                                std::cmp::max(1, hover_index) - 1,
-                            KeyCode::Left | KeyCode::Char('h') if !vertical =>
-                                std::cmp::max(1, hover_index) - 1,
-                            KeyCode::Down | KeyCode::Char('j') if vertical =>
-                                std::cmp::min(len-1, hover_index+1),
-                            KeyCode::Right | KeyCode::Char('l') if !vertical =>
-                                std::cmp::min(len-1, hover_index+1),
-                            _ => hover_index // not likely to happen
-                        }
-                    };
-                
+                KeyCode::Up | KeyCode::Char('k') if vertical => {
+                    let new_hover = std::cmp::max(1, hover_index) - 1;
                     self.leave(hover_index, new_hover);
                 }
-                _ => {}
+                KeyCode::Left | KeyCode::Char('h') if !vertical => {
+                    let new_hover = std::cmp::max(1, hover_index) - 1;
+                    self.leave(hover_index, new_hover);
+                },
+                KeyCode::Right | KeyCode::Char('l') if !vertical => {
+                    let new_hover = std::cmp::min(len-1, hover_index+1);
+                    self.leave(hover_index, new_hover);
+                }
+                KeyCode::Down | KeyCode::Char('j') if vertical => {
+                    let new_hover = std::cmp::min(len-1, hover_index+1);
+                    self.leave(hover_index, new_hover);
+                }
+                _ => {
+                    return CompState::ExitIgnore;
+                }
             },
             _ => {}
         }
@@ -226,9 +226,6 @@ impl Component for Nested {
 
     #[inline]
     fn render(&mut self, buffer: &mut tui::buffer::Buffer) {
-        if let None = self.area {
-            return;
-        }
         self.inner_comps
             .iter_mut()
             .for_each(|comp| comp.render(buffer));
@@ -245,24 +242,26 @@ impl Component for Nested {
         self.realign();
     }
 
-    #[inline]
+    /// This method is the key difference between Nested and
+    /// NakedNested
     fn alter_mode(&mut self, mode: CompMode) -> Option<CompState> {
         match mode {
+            CompMode::Hover => Some(CompState::Fall),
             CompMode::Enter => {
                 if let CursorMode::Hover(hover_index) = self.cursor {
                     self.hover(hover_index);
                 }
-            },
+                None
+            }
             CompMode::Leave => {
                 self.inner_comps
                     .iter_mut()
                     .for_each(|comp| {
                         let _ = comp.alter_mode(CompMode::Leave);
                     });
-            },
-            CompMode::Hover => {}
+                None
+            }
         }
-        None
     }
 
     #[inline]

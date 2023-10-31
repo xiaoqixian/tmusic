@@ -5,15 +5,16 @@
 use tui::{
     layout::{Constraint, Direction, Rect},
     widgets::{Widget, Gauge, Block, BorderType, Borders},
-    buffer::Buffer
+    buffer::Buffer, style::{Style, Color}
 };
 
 use super::component::{
+    CompState, 
     Component, 
-    CompMode, 
-    CompState,
-    StatefulComponent,
-    DefaultFrameStyle
+    CompMode,
+    Query,
+    QueryResponse,
+    Attribution
 };
 
 pub struct ProgressBar {
@@ -35,20 +36,30 @@ impl ProgressBar {
 }
 
 impl Component for ProgressBar {
-    #[inline]
-    fn set_area(&mut self, area: Rect) {
-        self.area = Some(area);
+    fn query(&self, q: Query) -> QueryResponse {
+        match q {
+            Query::Title => QueryResponse::Title(None),
+            Query::Constraint => 
+                QueryResponse::Constraint(self.constraint.clone()),
+            Query::UpdateDuration => 
+                QueryResponse::UpdateDuration(Some(std::time::Duration::from_secs(1)))
+        }
     }
 
-    #[inline]
-    fn get_constraint(&self) -> Constraint {
-        self.constraint.clone()
+    fn set_attr(&mut self, attr: Attribution) -> Option<CompState> {
+        match attr {
+            Attribution::Area(area) => {
+                self.area = Some(area);
+                None
+            }
+            Attribution::Mode(mode) => self.alter_mode(mode)
+        }
     }
 
     /// Currently, ProgressBar don't accept any event
     /// its not even enterable.
     #[inline]
-    fn read_event(&mut self, _: crossterm::event::Event) -> CompState {
+    fn feed_event(&mut self, _: crossterm::event::Event) -> CompState {
         CompState::Exit
     }
 
@@ -58,43 +69,20 @@ impl Component for ProgressBar {
             Some(area) => area
         };
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(self.border_type())
-            .border_style(self.border_style())
-            .title(
-                self.title
-                    .as_ref()
-                    .map(|t| t.as_str())
-                    .unwrap_or("")
-            );
-
-        let gauge = Gauge::default()
-            .block(block)
-            .percent(50);
-
-        gauge.render(area, buffer);
+        Gauge::default()
+            .style(Style::default().fg(Color::Yellow))
+            .percent(50)
+            .render(area, buffer);
     }
 
     #[inline]
-    fn alter_mode(&mut self, mode: CompMode) -> CompState {
+    fn alter_mode(&mut self, mode: CompMode) -> Option<CompState> {
         match mode {
-            CompMode::Enter => CompState::Exit,
+            CompMode::Enter => Some(CompState::Exit),
             m => {
                 self.comp_mode = m;
-                CompState::Stay
+                None
             }
         }
-    }
-
-    #[inline]
-    fn update_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_secs(1))
-    }
-}
-
-impl StatefulComponent for ProgressBar {
-    fn comp_mode(&self) -> CompMode {
-        self.comp_mode
     }
 }
